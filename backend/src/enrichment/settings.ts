@@ -10,6 +10,7 @@ export type ProviderSettings = {
 
 export const PROVIDER_ORDER: ProviderId[] = ['orionConnect', 'astraDialer', 'nimbusLookup']
 
+// Providers have announced rate limits but not published them yet; set rateLimitPerSecond here once they do.
 export const PROVIDER_SETTINGS: Record<ProviderId, ProviderSettings> = {
   orionConnect: { timeoutMs: 10_000 },
   astraDialer: { timeoutMs: 5_000 },

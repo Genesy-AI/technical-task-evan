@@ -58,6 +58,7 @@ app.patch('/leads/:id', async (req: Request, res: Response) => {
   const { name, email } = req.body
   const existing = await prisma.lead.findUnique({ where: { id: Number(id) } })
   const emailChanged = existing !== null && existing.email !== String(email)
+  const resetPhoneEnrichment = emailChanged && !existing.phoneNumber
   const lead = await prisma.lead.update({
     where: {
       id: Number(id),
@@ -66,10 +67,30 @@ app.patch('/leads/:id', async (req: Request, res: Response) => {
       firstName: String(name),
       email: String(email),
       ...(emailChanged && { emailVerified: null }),
+      ...(resetPhoneEnrichment && { phoneEnrichmentStatus: null, phoneEnrichmentProvider: null }),
     },
   })
+
+  if (resetPhoneEnrichment && existing.phoneEnrichmentStatus === 'IN_PROGRESS') {
+    await cancelPhoneEnrichment(lead.id)
+  }
+
   res.json(lead)
 })
+
+// Best effort: the run's writes are already scoped to the old email, so failing to cancel only wastes provider calls.
+async function cancelPhoneEnrichment(leadId: number) {
+  try {
+    const connection = await Connection.connect({ address: 'localhost:7233' })
+    try {
+      await new Client({ connection, namespace: 'default' }).workflow.getHandle(`enrich-phone-${leadId}`).cancel()
+    } finally {
+      await connection.close()
+    }
+  } catch (error) {
+    console.warn(`Could not cancel phone enrichment for lead ${leadId}:`, error)
+  }
+}
 
 app.delete('/leads/:id', async (req: Request, res: Response) => {
   const { id } = req.params
@@ -373,8 +394,9 @@ app.post('/leads/enrich-phones', async (req: Request, res: Response) => {
           continue
         }
 
+        const alreadyInProgress = lead.phoneEnrichmentStatus === 'IN_PROGRESS'
         try {
-          if (lead.phoneEnrichmentStatus !== 'IN_PROGRESS') {
+          if (!alreadyInProgress) {
             await prisma.lead.update({
               where: { id: lead.id },
               data: { phoneEnrichmentStatus: 'IN_PROGRESS', phoneEnrichmentProvider: null },
@@ -384,7 +406,6 @@ app.post('/leads/enrich-phones', async (req: Request, res: Response) => {
             taskQueue: 'myQueue',
             workflowId: `enrich-phone-${lead.id}`,
             workflowIdConflictPolicy: 'USE_EXISTING',
-            workflowExecutionTimeout: '5 minutes',
             args: [
               lead.id,
               { firstName: lead.firstName, lastName: lead.lastName, email: lead.email, jobTitle: lead.jobTitle },
@@ -392,10 +413,13 @@ app.post('/leads/enrich-phones', async (req: Request, res: Response) => {
           })
           started.push(lead.id)
         } catch (error) {
-          await prisma.lead.update({
-            where: { id: lead.id },
-            data: { phoneEnrichmentStatus: 'FAILED' },
-          })
+          // An earlier run may still be going and will report its own outcome.
+          if (!alreadyInProgress) {
+            await prisma.lead.update({
+              where: { id: lead.id },
+              data: { phoneEnrichmentStatus: 'FAILED' },
+            })
+          }
           errors.push({
             leadId: lead.id,
             leadName: `${lead.firstName} ${lead.lastName}`.trim(),

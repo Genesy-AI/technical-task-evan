@@ -27,3 +27,4 @@ export type PhoneEnrichmentStatus = 'IN_PROGRESS' | 'FOUND' | 'NOT_FOUND' | 'FAI
 export type EnrichPhoneResult =
   | { status: 'FOUND'; phoneNumber: string; providerId: ProviderId }
   | { status: 'NOT_FOUND' }
+  | { status: 'FAILED' }

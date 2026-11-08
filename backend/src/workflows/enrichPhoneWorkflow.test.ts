@@ -30,10 +30,12 @@ async function runEnrichment(lookup: LookupMock) {
   const taskQueue = `test-${Math.random()}`
 
   const dbActivities = {
-    async markPhoneEnrichmentProgress(_leadId: number, providerId: ProviderId) {
+    async markPhoneEnrichmentProgress(_leadId: number, email: string, providerId: ProviderId) {
+      expect(email).toBe(input.email)
       progress.push(providerId)
     },
-    async savePhoneEnrichmentResult(_leadId: number, result: unknown) {
+    async savePhoneEnrichmentResult(_leadId: number, email: string, result: unknown) {
+      expect(email).toBe(input.email)
       saved.push(result)
     },
   }
@@ -118,6 +120,23 @@ describe('enrichPhoneWorkflow', () => {
 
     expect(result).toEqual({ status: 'NOT_FOUND' })
     expect(calls).toEqual(['orionConnect', 'astraDialer', 'astraDialer', 'astraDialer', 'nimbusLookup'])
+    expect(saved).toEqual([{ status: 'NOT_FOUND' }])
+  }, 60_000)
+
+  it('marks FAILED rather than NOT_FOUND when no provider could answer', async () => {
+    const { result, saved } = await runEnrichment((providerId) => {
+      if (providerId === 'orionConnect') return { skipped: true }
+      throw ApplicationFailure.nonRetryable('401 Unauthorized')
+    })
+
+    expect(result).toEqual({ status: 'FAILED' })
+    expect(saved).toEqual([{ status: 'FAILED' }])
+  }, 60_000)
+
+  it('marks NOT_FOUND when every provider is skipped for missing data', async () => {
+    const { result, saved } = await runEnrichment(() => ({ skipped: true }))
+
+    expect(result).toEqual({ status: 'NOT_FOUND' })
     expect(saved).toEqual([{ status: 'NOT_FOUND' }])
   }, 60_000)
 })

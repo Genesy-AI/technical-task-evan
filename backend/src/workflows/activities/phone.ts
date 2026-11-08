@@ -48,19 +48,21 @@ export async function lookupPhone(providerId: ProviderId, input: PhoneLookupInpu
   throw new Error(detail)
 }
 
-export async function markPhoneEnrichmentProgress(leadId: number, providerId: ProviderId): Promise<void> {
-  await prisma.lead.update({
-    where: { id: leadId },
+// Writes are scoped to the email the run started with, so a run for an edited email can't overwrite the lead.
+export async function markPhoneEnrichmentProgress(leadId: number, email: string, providerId: ProviderId): Promise<void> {
+  await prisma.lead.updateMany({
+    where: { id: leadId, email },
     data: { phoneEnrichmentStatus: 'IN_PROGRESS', phoneEnrichmentProvider: providerId },
   })
 }
 
 export async function savePhoneEnrichmentResult(
   leadId: number,
+  email: string,
   result: { status: Exclude<PhoneEnrichmentStatus, 'IN_PROGRESS'>; phoneNumber?: string; providerId?: ProviderId }
 ): Promise<void> {
-  await prisma.lead.update({
-    where: { id: leadId },
+  await prisma.lead.updateMany({
+    where: { id: leadId, email },
     data: {
       phoneEnrichmentStatus: result.status,
       phoneEnrichmentProvider: result.providerId ?? null,

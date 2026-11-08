@@ -39,9 +39,13 @@ for (const id of PROVIDER_ORDER) {
 }
 
 export async function enrichPhoneWorkflow(leadId: number, input: PhoneLookupInput): Promise<EnrichPhoneResult> {
+  const { email } = input
   try {
+    let anyProviderAnswered = false
+    let anyProviderFailed = false
+
     for (const providerId of PROVIDER_ORDER) {
-      await markPhoneEnrichmentProgress(leadId, providerId)
+      await markPhoneEnrichmentProgress(leadId, email, providerId)
 
       let result
       try {
@@ -49,6 +53,7 @@ export async function enrichPhoneWorkflow(leadId: number, input: PhoneLookupInpu
       } catch (err) {
         if (!(err instanceof ActivityFailure)) throw err
         log.warn('Phone provider failed, trying next provider', { leadId, providerId, error: err.cause?.message })
+        anyProviderFailed = true
         continue
       }
 
@@ -57,16 +62,23 @@ export async function enrichPhoneWorkflow(leadId: number, input: PhoneLookupInpu
         continue
       }
 
+      anyProviderAnswered = true
       if (result.phone) {
-        await savePhoneEnrichmentResult(leadId, { status: 'FOUND', phoneNumber: result.phone, providerId })
+        await savePhoneEnrichmentResult(leadId, email, { status: 'FOUND', phoneNumber: result.phone, providerId })
         return { status: 'FOUND', phoneNumber: result.phone, providerId }
       }
     }
 
-    await savePhoneEnrichmentResult(leadId, { status: 'NOT_FOUND' })
+    // "No data" is only trustworthy if some provider actually answered.
+    if (anyProviderFailed && !anyProviderAnswered) {
+      await savePhoneEnrichmentResult(leadId, email, { status: 'FAILED' })
+      return { status: 'FAILED' }
+    }
+
+    await savePhoneEnrichmentResult(leadId, email, { status: 'NOT_FOUND' })
     return { status: 'NOT_FOUND' }
   } catch (err) {
-    await CancellationScope.nonCancellable(() => savePhoneEnrichmentResult(leadId, { status: 'FAILED' }))
+    await CancellationScope.nonCancellable(() => savePhoneEnrichmentResult(leadId, email, { status: 'FAILED' }))
     throw err
   }
 }

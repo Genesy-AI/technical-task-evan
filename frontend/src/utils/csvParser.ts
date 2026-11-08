@@ -69,7 +69,7 @@ export const parseCsv = (content: string): CsvLead[] => {
           lead.jobTitle = trimmedValue || undefined
           break
         case 'countrycode':
-          lead.countryCode = normalizeCountryCode(trimmedValue) || undefined
+          lead.countryCode = trimmedValue || undefined
           break
         case 'companyname':
           lead.companyName = trimmedValue || undefined
@@ -89,8 +89,12 @@ export const parseCsv = (content: string): CsvLead[] => {
     } else if (!isValidEmail(lead.email)) {
       errors.push('Invalid email format')
     }
-    if (lead.countryCode && !isValidCountryCode(lead.countryCode)) {
-      errors.push(`Invalid country code "${lead.countryCode}"`)
+    if (lead.countryCode) {
+      if (isValidCountryCode(lead.countryCode)) {
+        lead.countryCode = normalizeCountryCode(lead.countryCode)
+      } else {
+        errors.push(`Invalid country code "${lead.countryCode}"`)
+      }
     }
 
     data.push({
